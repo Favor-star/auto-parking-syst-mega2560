@@ -22,16 +22,16 @@ enum active_page
   PAYMENT_INFO_PAGE
 };
 
-int active_page = HOMEPAGE;
+int active_page = NO_WIFI_PAGE;
 int available_slots = 10;
 URTouch myTouch(6, 5, 4, 3, 2);
 
 UTFT_Buttons myButtons(&myGLCD, &myTouch);
 UTFT_Buttons myModalButtons(&myGLCD, &myTouch);
 UTFT_Buttons goToPaymentButtons(&myGLCD, &myTouch);
-
+UTFT_Buttons resetButton(&myGLCD, &myTouch);
 int key1, key2, key3, key4, key5, key6, key7, key8, key9, key0, clear, enter, pressed_buttons, yes_btn, cancel_btn;
-int confirm_pay;
+int confirm_pay, reset_wifi_btn;
 String number;
 void handle_buttons_touch();
 void handle_serial_data();
@@ -85,6 +85,7 @@ void handle_serial_data()
     String command = Serial2.readStringUntil('\n');
     Serial.print(F("Received command now: "));
     Serial.println(command);
+    Serial.println(command.startsWith("IDLE"));
     if (command.startsWith("NO_WIFI") && active_page != NO_WIFI_PAGE)
     {
       active_page = NO_WIFI_PAGE;
@@ -93,6 +94,7 @@ void handle_serial_data()
     }
     else if (command.startsWith("IDLE") && active_page != HOMEPAGE)
     {
+      Serial.println("What the fuck is happening here?");
       clear_screen();
       active_page = HOMEPAGE;
       Serial.println(command.substring(5));
@@ -257,10 +259,6 @@ void handle_buttons_touch()
         Serial2.println(commandToESP);
       }
     case PAYMENT_INFO_PAGE:
-      Serial.print("Prressed button is: ");
-      Serial.println(pressed_buttons);
-      Serial.print(F("Pressed button: "));
-      Serial.println(pressed_buttons);
       pressed_buttons = goToPaymentButtons.checkButtons();
       if (pressed_buttons == confirm_pay)
       {
@@ -268,6 +266,16 @@ void handle_buttons_touch()
         active_page = BUTTONS_PAGE;
         drawButtons();
       }
+    case NO_WIFI_PAGE:
+      pressed_buttons = resetButton.checkButtons();
+      if (pressed_buttons == reset_wifi_btn)
+      {
+        Serial2.println("RESET");
+        delay(200);
+        // reset arduino via soft reset
+        asm volatile("  jmp 0");
+      }
+      break;
     default:
       break;
     }
@@ -419,12 +427,15 @@ void draw_no_wifi_screen()
 {
   myGLCD.setColor(255, 0, 0);
   myGLCD.setFont(BigFont);
-  myGLCD.print("NO INTERNET", CENTER, 60);
+  myGLCD.print("NO INTERNET", CENTER, 40);
   myGLCD.setColor(255, 255, 255);
   myGLCD.setFont(SmallFont);
 
-  myGLCD.print("Please connect to wifi", CENTER, 100);
-  myGLCD.print("System needs to be on internet.", LEFT + 10, 140);
-  myGLCD.print("This is mainly because of the payment", LEFT + 10, 160);
-  myGLCD.print("can't be made without it", LEFT + 10, 180);
+  myGLCD.print("Please connect to wifi", CENTER, 80);
+  myGLCD.print("System needs to be on internet.", LEFT + 10, 120);
+  myGLCD.print("This is mainly because of the payment", LEFT + 10, 140);
+  myGLCD.print("can't be made without it", LEFT + 10, 160);
+  resetButton.setTextFont(BigFont);
+  reset_wifi_btn = resetButton.addButton(100, 180, 150, 50, "REFRESH");
+  resetButton.drawButtons();
 }
