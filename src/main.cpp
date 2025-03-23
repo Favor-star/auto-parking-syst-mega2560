@@ -1,6 +1,9 @@
+#include <Arduino.h>
 #include <UTFT.h>
 #include <URTouch.h>
 #include <UTFT_Buttons.h>
+// #include <HardwareSerial.h>
+// #include <Wire.h>
 
 // Declare which fonts we will be using
 extern uint8_t SmallFont[];
@@ -13,12 +16,14 @@ UTFT myGLCD(CTE32_R2, 38, 39, 40, 41);
 
 enum active_page
 {
+  ERROR_PAGE,
   NO_WIFI_PAGE,
   HOMEPAGE,
   MODAL_PAGE,
   BUTTONS_PAGE,
   SUCCESS_VERIFICATION_PAGE,
   WAIT_PAYMENT_PAGE,
+  RETRY_PAYMENT_PAGE,
   PAYMENT_INFO_PAGE
 };
 
@@ -31,6 +36,9 @@ UTFT_Buttons myModalButtons(&myGLCD, &myTouch);
 UTFT_Buttons goToPaymentButtons(&myGLCD, &myTouch);
 UTFT_Buttons resetButton(&myGLCD, &myTouch);
 int key1, key2, key3, key4, key5, key6, key7, key8, key9, key0, clear, enter, pressed_buttons, yes_btn, cancel_btn;
+String enterTime, exitTime;
+String cardId;
+int payment_amount;
 int confirm_pay, reset_wifi_btn;
 String number;
 void handle_buttons_touch();
@@ -46,6 +54,9 @@ void draw_prompt_payment_page();
 void draw_show_payment_info();
 void clear_screen();
 void draw_no_wifi_screen();
+void draw_error_page();
+int parseTimeToSeconds(String time);
+void displayElapsedTime(String enterTime, String exitTime);
 
 void setup()
 {
@@ -56,6 +67,7 @@ void setup()
   myGLCD.setFont(SmallFont);
 
   myTouch.InitTouch();
+  delay(500);
   myTouch.setPrecision(PREC_MEDIUM);
 
   myButtons.setTextFont(BigFont);
@@ -74,18 +86,23 @@ void setup()
 
 void loop()
 {
-  handle_buttons_touch();
-  handle_serial_data();
+
+  while (true)
+  {
+    handle_serial_data();
+    // handle_buttons_touch();
+  }
 }
 
 void handle_serial_data()
 {
+
   if (Serial2.available())
   {
+    Serial.println("Serial 2 is available");
     String command = Serial2.readStringUntil('\n');
     Serial.print(F("Received command now: "));
     Serial.println(command);
-    Serial.println(command.startsWith("IDLE"));
     if (command.startsWith("NO_WIFI") && active_page != NO_WIFI_PAGE)
     {
       active_page = NO_WIFI_PAGE;
@@ -126,22 +143,80 @@ void handle_serial_data()
       Serial.println(command.substring(21));
       clear_screen();
       draw_success_verify();
+      if (command.substring(20).startsWith("f658c096"))
+      {
+        Serial.println("Phone registered successfully");
+        enterTime = command.substring(20 + 8 + 10);
+        Serial.print(F("Enter time: "));
+        Serial.println(enterTime);
+        myGLCD.print("Entered at: " + enterTime, 10, 170);
+        myGLCD.print("Plate number: RAB0005", 10, 140);
+        myGLCD.print("Registered to: Rukundo", 10, 155);
+      }
+      else if (0)
+      {
+      }
+      else
+      {
+      }
+      {
+        myGLCD.print("", 20, 30);
+      }
     }
     else if (command.startsWith("WAITING_PAYMENT") && active_page != WAIT_PAYMENT_PAGE)
     {
+
+      Serial.println("Waiting payment was called");
       active_page = WAIT_PAYMENT_PAGE;
+      clear_screen();
+      // draw_prompt_payment_page();
+      draw_error_page();
+    }
+    else if (command.startsWith("RETRY_PAYMENT") && active_page != RETRY_PAYMENT_PAGE)
+    {
+      active_page = RETRY_PAYMENT_PAGE;
       clear_screen();
       draw_prompt_payment_page();
     }
     else if (command.startsWith("CARD_INFO_AT_PAY:") && active_page != PAYMENT_INFO_PAGE)
     {
-      Serial.print(F("Card info: "));
-      Serial.println(command.substring(18));
+      // Extract cardId, exitTime, and enterTime from the command string
+      cardId = command.substring(17, 25);
+      Serial.print(F("Card id: "));
+      Serial.println(cardId);
+
+      int exitTimeIndex = command.indexOf("exitTime:") + 9;
+      exitTime = command.substring(exitTimeIndex, exitTimeIndex + 8);
+      Serial.print(F("Exit time: "));
+      Serial.println(exitTime);
+
+      int enterTimeIndex = command.indexOf("enterTime:") + 10;
+      enterTime = command.substring(enterTimeIndex, enterTimeIndex + 8);
+      Serial.print(F("Enter time: "));
+      Serial.println(enterTime);
+
       active_page = PAYMENT_INFO_PAGE;
       myGLCD.clrScr();
       myGLCD.fillScr(0, 0, 0);
       delay(200);
       draw_show_payment_info();
+      if (cardId.startsWith("f658c096"))
+      {
+        displayElapsedTime(enterTime, exitTime);
+        delay(5000);
+        String commandToESP = "PROCEED:0788837266";
+        Serial2.println(commandToESP);
+      }
+      else if (cardId.startsWith("b13e737f"))
+      {
+        displayElapsedTime(enterTime, exitTime);
+        delay(5000);
+        String commandToESP = "PROCEED:0788837266-AMOUNT:" + String(payment_amount);
+        Serial2.println(commandToESP);
+      }
+      else
+      {
+      }
     }
     else if (command == "EXITING")
     {
@@ -158,8 +233,11 @@ void handle_serial_data()
       // clear_screen();
       // draw_home();
     }
-    else if (command == "ERROR")
+    else if (command.startsWith("ERROR"))
     {
+      active_page = ERROR_PAGE;
+      clear_screen();
+      draw_error_page();
     }
   }
 }
@@ -169,6 +247,13 @@ void handle_buttons_touch()
   if (myTouch.dataAvailable())
   {
 
+    Serial.println("Touch data is available");
+    int x = myTouch.getX();
+    int y = myTouch.getY();
+    Serial.print("X: ");
+    Serial.println(x);
+    Serial.print("Y: ");
+    Serial.println(y);
     switch (active_page)
     {
     case BUTTONS_PAGE:
@@ -279,6 +364,7 @@ void handle_buttons_touch()
     default:
       break;
     }
+    delay(200);
   }
 }
 void draw_home()
@@ -288,7 +374,8 @@ void draw_home()
   myGLCD.setFont(SmallFont);
   myGLCD.print("WELCOME TO THE ", CENTER, 10);
   myGLCD.setFont(BigFont);
-  myGLCD.print("SMART PARKING SYSTEM", CENTER, 30);
+  myGLCD.print("KIGALI CITY MARKET", CENTER, 30);
+  myGLCD.print("PARKING", CENTER, 50);
   myGLCD.setColor(182, 247, 2);
   myGLCD.setFont(BigFont);
   myGLCD.print("Available Slots: ", CENTER, 100);
@@ -310,9 +397,9 @@ void draw_success_verify()
   myGLCD.print("Car info: ", 10, 115);
   myGLCD.setColor(255, 255, 255);
   myGLCD.drawLine(LEFT, 130, RIGHT, 131);
-  myGLCD.print("Plate number: ", 10, 140);
-  myGLCD.print("Registered to: ", 10, 155);
-  myGLCD.print("Phone number: ", 10, 170);
+  // myGLCD.print("Plate number: ", 10, 140);
+  // myGLCD.print("Registered to: ", 10, 155);
+  // myGLCD.print("Phone number: ", 10, 170);
 }
 
 void drawButtons()
@@ -407,12 +494,12 @@ void draw_show_payment_info()
   myGLCD.setFont(BigFont);
   myGLCD.print("Total ", LEFT + 10, 150);
   myGLCD.setFont(SevenSegNumFont);
-  myGLCD.print("5000", LEFT + 10, 180);
+  myGLCD.print("100", LEFT + 10, 180);
   myGLCD.setFont(BigFont);
   myGLCD.print("RWF", 140, 200);
-  goToPaymentButtons.setTextFont(BigFont);
-  confirm_pay = goToPaymentButtons.addButton(200, 180, 110, 50, "PAY");
-  goToPaymentButtons.drawButtons();
+  // goToPaymentButtons.setTextFont(BigFont);
+  // confirm_pay = goToPaymentButtons.addButton(200, 180, 110, 50, "PAY");
+  // goToPaymentButtons.drawButtons();
 }
 void clear_screen()
 {
@@ -438,4 +525,47 @@ void draw_no_wifi_screen()
   resetButton.setTextFont(BigFont);
   reset_wifi_btn = resetButton.addButton(100, 180, 150, 50, "REFRESH");
   resetButton.drawButtons();
+}
+
+void draw_error_page()
+{
+  myGLCD.setColor(255, 0, 0);
+  myGLCD.setFont(BigFont);
+  myGLCD.print("ERROR", CENTER, 40);
+  myGLCD.setColor(255, 255, 255);
+  myGLCD.setFont(SmallFont);
+
+  myGLCD.print("An error occured", CENTER, 80);
+  myGLCD.print("Please try again", CENTER, 120);
+  myGLCD.print("If the problem persists", CENTER, 160);
+  myGLCD.print("Please contact the admin", CENTER, 200);
+}
+int parseTimeToSeconds(String time)
+{
+  int hours = time.substring(0, 2).toInt();
+  int minutes = time.substring(3, 5).toInt();
+  int seconds = time.substring(6, 8).toInt();
+  return (hours * 3600) + (minutes * 60) + seconds;
+}
+
+void displayElapsedTime(String enterTime, String exitTime)
+{
+  int enterSeconds = parseTimeToSeconds(enterTime);
+  int exitSeconds = parseTimeToSeconds(exitTime);
+  int elapsedTime = exitSeconds - enterSeconds;
+
+  // Optionally convert elapsedTime back to HH:MM:SS format
+  int hours = elapsedTime / 3600;
+  int minutes = (elapsedTime % 3600) / 60;
+  int seconds = elapsedTime % 60;
+
+  String elapsedTimeStr = String(hours) + ":" + String(minutes) + ":" + String(seconds);
+  myGLCD.setFont(SmallFont);
+  myGLCD.print(elapsedTimeStr, LEFT + 100, 110);
+  myGLCD.print("Entered at: " + enterTime, LEFT + 10, 50);
+  myGLCD.print("Exited at: " + exitTime, LEFT + 10, 80);
+  myGLCD.print("Total Elapsed time:" + elapsedTimeStr, LEFT + 10, 110);
+  myGLCD.setFont(SevenSegNumFont);
+  payment_amount = elapsedTime * 1;
+  myGLCD.print(String(payment_amount), LEFT + 5, 180);
 }
